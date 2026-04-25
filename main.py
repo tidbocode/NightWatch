@@ -8,7 +8,7 @@ from rich.prompt import Prompt
 from rich.table import Table
 
 from chatbot import NightWatch
-from config import CHAT_MODEL, EMBED_MODEL
+from config import CHAT_MODEL, FAST_MODEL
 
 console = Console()
 
@@ -43,7 +43,7 @@ def check_ollama() -> bool:
         )
         return False
 
-    missing = [m for m in (CHAT_MODEL, EMBED_MODEL) if not any(a.startswith(m) for a in available)]
+    missing = [m for m in (CHAT_MODEL, FAST_MODEL) if not any(a.startswith(m) for a in available)]
     if missing:
         console.print(f"[red]Missing models:[/red] {', '.join(missing)}")
         for m in missing:

@@ -1,17 +1,14 @@
-CHAT_MODEL = "llama3.2"
-EMBED_MODEL = "nomic-embed-text"
+CHAT_MODEL = "mistral:7b"
+FAST_MODEL = "llama3.2"          # used for watch mode where speed matters more than accuracy
 
-# Context window token budget (approximate — 1 token ≈ 4 chars)
-CONTEXT_TOKEN_BUDGET = 3000
+# Token budget per log chunk sent to the LLM (approximate — 1 token ≈ 4 chars)
+CHUNK_TOKEN_BUDGET = 1500
 
-# Trigger summarization when this fraction of the budget is used
-SUMMARIZE_THRESHOLD = 0.75
+# Minimum alert severity to display: CRITICAL, HIGH, MEDIUM, LOW, INFO
+MIN_SEVERITY = "LOW"
 
-# Keep this many recent messages verbatim; summarize everything older
-RECENT_MESSAGES_KEEP = 6
+# Max raw log lines to include in a single Alert's affected_lines list
+MAX_AFFECTED_LINES = 10
 
-# How many vector memories to inject per turn
-MEMORY_TOP_K = 3
-
-# ChromaDB persistence directory
-MEMORY_DB_PATH = "./memory_db"
+# SQLite database path for alert persistence
+ALERT_DB_PATH = "./nightwatch.db"
