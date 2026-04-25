@@ -1,4 +1,4 @@
-![Image](https://github.com/tidbocode/Mockingbird-LLM/blob/main/MockingbirdLLM.jpg)
+![Image](https://github.com/tidbocode/NightWatch-LLM/blob/main/NightWatch-LLM.jpg)
 
 # Mockingbird-LLM
 
