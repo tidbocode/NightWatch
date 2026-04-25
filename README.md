@@ -1,4 +1,10 @@
+<<<<<<< HEAD
 # NightWatch-LLM
+=======
+![Image](https://github.com/tidbocode/NightWatch-LLM/blob/main/NightWatch-LLM.jpg)
+
+# Mockingbird-LLM
+>>>>>>> 7826ac67ed00293dd2c953c91be6cea4c9c5daaf
 
 A local LLM chatbot that teaches four core memory fundamentals — all running on your machine via Ollama.
 
