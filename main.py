@@ -29,7 +29,7 @@ BANNER = r"""
 |_| \_||_|\__, |_| |_|\__|    \_/\_/ \__,_|\__\___|_| |_(_)
           |___/
 
-              https://github.com/tidbocode/NightWatch-LLM
+              https://github.com/tidbocode/NightWatch
 """
 
 _SEV_COLOR = {

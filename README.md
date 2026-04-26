@@ -1,6 +1,6 @@
-![Image](https://github.com/tidbocode/NightWatch-LLM/blob/main/NightWatch-LLM.jpg)
+![Image](https://github.com/tidbocode/NightWatch/blob/main/NightWatch.jpg)
 
-# NightWatch-LLM
+# NightWatch
 
 A fully local, privacy-first log analyzer that uses a local LLM (via Ollama) to detect security threats in your log files — no cloud, no data leaving your machine.
 
