@@ -8,7 +8,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from analyzer import ThreatAnalyzer, _MAX_SUMMARY_CHARS
-from models.alert import Severity
+from models.alert import Alert, Remediation, Severity
 from models.log_entry import LogEntry, LogFormat
 
 
@@ -368,3 +368,173 @@ class TestAlertStore:
         assert s["total_alerts"] == 1
         assert s["by_severity"].get("HIGH") == 1
         assert s["ioc_count"] == 2
+
+
+# ---------------------------------------------------------------------------
+# Remediation parsing
+# ---------------------------------------------------------------------------
+
+class TestRemediationParsing:
+
+    def setup_method(self):
+        self.az = _make_analyzer()
+        self.entries = [_entry("test line")]
+
+    def test_remediation_parsed_when_present(self):
+        raw = json.dumps({"alerts": [{
+            "severity": "HIGH", "title": "t", "description": "d",
+            "recommendation": "r", "iocs": [], "affected_lines": [],
+            "remediation": {
+                "action": "block_ip",
+                "command": "iptables -I INPUT -s 1.2.3.4 -j DROP",
+                "reversible": True,
+                "undo_command": "iptables -D INPUT -s 1.2.3.4 -j DROP",
+            },
+        }], "chunk_summary": ""})
+        alerts, _ = self.az._parse_response(raw, self.entries, "auth.log")
+        r = alerts[0].remediation
+        assert r is not None
+        assert r.action == "block_ip"
+        assert r.command == "iptables -I INPUT -s 1.2.3.4 -j DROP"
+        assert r.reversible is True
+        assert r.undo_command == "iptables -D INPUT -s 1.2.3.4 -j DROP"
+
+    def test_remediation_none_when_field_missing(self):
+        raw = json.dumps({"alerts": [{
+            "severity": "LOW", "title": "t", "description": "d",
+            "recommendation": "r", "iocs": [], "affected_lines": [],
+        }], "chunk_summary": ""})
+        alerts, _ = self.az._parse_response(raw, self.entries, "auth.log")
+        assert alerts[0].remediation is None
+
+    def test_remediation_none_when_command_empty(self):
+        raw = json.dumps({"alerts": [{
+            "severity": "LOW", "title": "t", "description": "d",
+            "recommendation": "r", "iocs": [], "affected_lines": [],
+            "remediation": {"action": "none", "command": "", "reversible": False, "undo_command": ""},
+        }], "chunk_summary": ""})
+        alerts, _ = self.az._parse_response(raw, self.entries, "auth.log")
+        assert alerts[0].remediation is None
+
+    def test_remediation_irreversible(self):
+        raw = json.dumps({"alerts": [{
+            "severity": "CRITICAL", "title": "t", "description": "d",
+            "recommendation": "r", "iocs": [], "affected_lines": [],
+            "remediation": {
+                "action": "disable_account",
+                "command": "usermod -L backdoor",
+                "reversible": False,
+                "undo_command": "",
+            },
+        }], "chunk_summary": ""})
+        alerts, _ = self.az._parse_response(raw, self.entries, "auth.log")
+        r = alerts[0].remediation
+        assert r is not None
+        assert r.reversible is False
+        assert r.undo_command == ""
+
+
+# ---------------------------------------------------------------------------
+# String items in alerts array are skipped (schema violation guard)
+# ---------------------------------------------------------------------------
+
+class TestStringAlertGuard:
+
+    def setup_method(self):
+        self.az = _make_analyzer()
+        self.entries = [_entry("test line")]
+
+    def test_string_items_skipped_without_crash(self):
+        raw = json.dumps({"alerts": [
+            "IP 1.2.3.4 attempted brute force",
+            "Another plain string",
+        ], "chunk_summary": "activity detected"})
+        alerts, summary = self.az._parse_response(raw, self.entries, "auth.log")
+        assert alerts == []
+        assert summary == "activity detected"
+
+    def test_mixed_strings_and_objects_keeps_objects(self):
+        raw = json.dumps({"alerts": [
+            "plain string item",
+            {"severity": "HIGH", "title": "Real alert", "description": "d",
+             "recommendation": "r", "iocs": [], "affected_lines": []},
+        ], "chunk_summary": ""})
+        alerts, _ = self.az._parse_response(raw, self.entries, "auth.log")
+        assert len(alerts) == 1
+        assert alerts[0].title == "Real alert"
+
+
+# ---------------------------------------------------------------------------
+# Second-pass repair
+# ---------------------------------------------------------------------------
+
+class TestRepairMechanism:
+
+    def setup_method(self):
+        self.az = _make_analyzer()
+        self.entries = [_entry("test line")]
+
+    def test_needs_repair_false_when_alerts_present(self):
+        alert = Alert(severity=Severity.HIGH, title="t", description="d",
+                      recommendation="r", iocs=[], affected_lines=[],
+                      log_format="syslog", chunk_index=0)
+        assert self.az._needs_repair('{"alerts": [...]}', [alert]) is False
+
+    def test_needs_repair_false_when_raw_has_no_alerts_key(self):
+        assert self.az._needs_repair("no alerts here", []) is False
+
+    def test_needs_repair_true_when_strings_in_alerts_array(self):
+        raw = json.dumps({"alerts": ["some string finding"], "chunk_summary": ""})
+        assert self.az._needs_repair(raw, []) is True
+
+    def test_repair_not_triggered_when_alerts_parse_ok(self):
+        entries = [_entry("Jan  5 12:34:56 host sshd[1]: msg")]
+        good_response = _json_response([{
+            "severity": "HIGH", "title": "Brute Force", "description": "d",
+            "recommendation": "r", "iocs": [], "affected_lines": [],
+        }])
+
+        with patch("analyzer.ollama") as mock_ollama:
+            mock_ollama.chat.return_value = iter(good_response)
+            alerts = list(self.az.analyze_stream(iter(entries)))
+
+        assert mock_ollama.chat.call_count == 1
+        assert len(alerts) == 1
+
+    def test_repair_called_when_alerts_are_strings(self):
+        bad_raw = json.dumps({
+            "alerts": ["IP 1.2.3.4 attempted brute force"],
+            "chunk_summary": "brute force",
+        })
+        good_raw = json.dumps({"alerts": [{
+            "severity": "HIGH", "title": "Brute Force", "description": "many failures",
+            "recommendation": "block ip", "iocs": ["1.2.3.4"], "affected_lines": [],
+        }], "chunk_summary": "brute force"})
+
+        with patch("analyzer.ollama") as mock_ollama:
+            mock_ollama.chat.side_effect = [
+                iter(_stream(bad_raw)),
+                iter(_stream(good_raw)),
+            ]
+            alerts = list(self.az.analyze_stream(iter(self.entries)))
+
+        assert mock_ollama.chat.call_count == 2
+        assert len(alerts) == 1
+        assert alerts[0].title == "Brute Force"
+
+    def test_repair_falls_back_gracefully_when_ollama_errors(self):
+        bad_raw = json.dumps({
+            "alerts": ["some string alert"],
+            "chunk_summary": "activity",
+        })
+
+        with patch("analyzer.ollama") as mock_ollama:
+            mock_ollama.chat.side_effect = [
+                iter(_stream(bad_raw)),
+                ConnectionError("Ollama down during repair"),
+            ]
+            alerts = list(self.az.analyze_stream(iter(self.entries)))
+
+        # Repair failed → falls back to bad_raw → no valid alert objects → empty
+        assert mock_ollama.chat.call_count == 2
+        assert alerts == []

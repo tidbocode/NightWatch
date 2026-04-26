@@ -105,6 +105,14 @@ def render_alert(alert: Alert, min_severity: str = "LOW", show_lines: bool = Tru
         if len(alert.affected_lines) > 3:
             parts.append(f"  [dim]... {len(alert.affected_lines) - 3} more[/dim]")
 
+    if alert.remediation and alert.remediation.command:
+        r = alert.remediation
+        parts += ["", "[yellow]Remediation — DRY RUN (not executed)[/yellow]"]
+        parts.append(f"  Action:  [dim]{r.action}[/dim]")
+        parts.append(f"  Command: [yellow bold]$ {r.command}[/yellow bold]")
+        if r.reversible and r.undo_command:
+            parts.append(f"  Undo:    [dim]$ {r.undo_command}[/dim]")
+
     ts = f" · {alert.timestamp_first}" if alert.timestamp_first else ""
     console.print(Panel(
         "\n".join(parts),

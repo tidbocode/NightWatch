@@ -17,6 +17,14 @@ SEVERITY_RANK: dict[str, int] = {s.value: i for i, s in enumerate(Severity)}
 
 
 @dataclass
+class Remediation:
+    action: str
+    command: str
+    reversible: bool = True
+    undo_command: str = ""
+
+
+@dataclass
 class Alert:
     severity: Severity
     title: str
@@ -31,6 +39,7 @@ class Alert:
     source_file: str = ""
     id: str = field(default_factory=lambda: str(uuid.uuid4()))
     generated_at: datetime = field(default_factory=datetime.utcnow)
+    remediation: Remediation | None = None
 
     def meets_minimum(self, min_severity: str) -> bool:
         """Return True if this alert's severity is >= min_severity."""

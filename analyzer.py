@@ -14,7 +14,7 @@ from config import (
 )
 from memory.alert_store import AlertStore
 from memory.session import AnalysisSession
-from models.alert import Alert, Severity
+from models.alert import Alert, Remediation, Severity
 from models.log_entry import LogEntry
 from utils.token_budget import TokenBudget
 
@@ -34,7 +34,13 @@ Response schema:
       "description": "What is happening and why it is suspicious",
       "recommendation": "Concrete remediation step",
       "iocs": ["ip", "username", "path", "hash"],
-      "affected_lines": ["exact raw log line 1"]
+      "affected_lines": ["exact raw log line 1"],
+      "remediation": {
+        "action": "block_ip|disable_account|kill_session|rotate_credential|none",
+        "command": "exact shell command to run (empty string if action is none)",
+        "reversible": true,
+        "undo_command": "shell command to undo (empty string if not applicable)"
+      }
     }
   ],
   "chunk_summary": "One sentence describing the overall activity in this batch"
@@ -47,7 +53,13 @@ Example of a correctly formatted alert object:
   "description": "14 failed SSH login attempts targeting root, admin, and ubuntu within 90 seconds from a single external IP.",
   "recommendation": "Block 203.0.113.42 at the firewall and enable fail2ban.",
   "iocs": ["203.0.113.42", "root", "admin", "ubuntu"],
-  "affected_lines": ["Jan 5 08:15:33 webserver sshd[1843]: Failed password for root from 203.0.113.42"]
+  "affected_lines": ["Jan 5 08:15:33 webserver sshd[1843]: Failed password for root from 203.0.113.42"],
+  "remediation": {
+    "action": "block_ip",
+    "command": "iptables -I INPUT -s 203.0.113.42 -j DROP",
+    "reversible": true,
+    "undo_command": "iptables -D INPUT -s 203.0.113.42 -j DROP"
+  }
 }
 
 Severity guide:
@@ -256,6 +268,16 @@ class ThreatAnalyzer:
             except ValueError:
                 severity = Severity.INFO
 
+            remediation = None
+            rem = item.get("remediation")
+            if isinstance(rem, dict) and rem.get("command"):
+                remediation = Remediation(
+                    action=str(rem.get("action", "none")),
+                    command=str(rem.get("command", "")),
+                    reversible=bool(rem.get("reversible", True)),
+                    undo_command=str(rem.get("undo_command", "")),
+                )
+
             alerts.append(Alert(
                 severity=severity,
                 title=str(item.get("title", "Unknown threat"))[:80],
@@ -268,6 +290,7 @@ class ThreatAnalyzer:
                 timestamp_first=ts_first,
                 timestamp_last=ts_last,
                 source_file=source_file,
+                remediation=remediation,
             ))
 
         return alerts, chunk_summary
@@ -298,13 +321,18 @@ class ThreatAnalyzer:
     # ------------------------------------------------------------------
 
     def _needs_repair(self, raw: str, alerts: list[Alert]) -> bool:
-        """True when the response parsed but returned no real alerts because
-        the alerts array contained strings instead of objects."""
-        # Only trigger repair when the raw text looks like a non-empty alerts array
-        # but nothing survived the isinstance(item, dict) filter.
+        """True when the alerts array contained strings instead of objects."""
         if alerts:
             return False
-        return '"alerts"' in raw and raw.count('"') > 4
+        try:
+            cleaned = re.sub(r"```(?:json)?\s*|\s*```", "", raw).strip()
+            brace = cleaned.find("{")
+            if brace >= 0:
+                cleaned = cleaned[brace:]
+            data, _ = json.JSONDecoder().raw_decode(cleaned)
+            return any(isinstance(item, str) for item in data.get("alerts", []))
+        except (json.JSONDecodeError, Exception):
+            return False
 
     def _repair_response(self, original_messages: list[dict], bad_response: str) -> str:
         repair_messages = original_messages + [
