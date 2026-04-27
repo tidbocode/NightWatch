@@ -112,6 +112,21 @@ class ThreatAnalyzer:
         self.alert_store = AlertStore(db_path)
         self._rolling_summary: str | None = None
         self._chunk_index: int = 0
+        self._retriever = self._init_retriever()
+
+    @staticmethod
+    def _init_retriever():
+        """Load the threat intel retriever if the DB has been built; silently skip if not."""
+        try:
+            from pathlib import Path
+            from config import INTEL_DB_PATH
+            if not Path(INTEL_DB_PATH).exists():
+                return None
+            from intel.retriever import ThreatIntelRetriever
+            r = ThreatIntelRetriever()
+            return r if r.available else None
+        except Exception:
+            return None
 
     # ------------------------------------------------------------------
     # Public API
@@ -206,6 +221,18 @@ class ThreatAnalyzer:
 
     def _build_messages(self, chunk_text: str) -> list[dict]:
         messages: list[dict] = [{"role": "system", "content": _SYSTEM_PROMPT}]
+
+        if self._retriever:
+            snippets = self._retriever.retrieve(chunk_text)
+            if snippets:
+                messages.append({
+                    "role": "system",
+                    "content": (
+                        "[Threat Intelligence Context — use to enrich analysis with "
+                        "technique IDs, CVE refs, and tactic names]\n\n"
+                        + "\n\n---\n\n".join(snippets)
+                    ),
+                })
 
         if self._rolling_summary:
             messages.append({
