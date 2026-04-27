@@ -15,3 +15,8 @@ ALERT_DB_PATH = "./nightwatch.db"
 
 # LLM generation — low temperature for consistent JSON output
 LLM_TEMPERATURE = 0.1
+
+# Threat intelligence RAG (requires: pip install chromadb && ollama pull nomic-embed-text)
+EMBED_MODEL = "nomic-embed-text"   # embedding model served by Ollama
+INTEL_DB_PATH = "./nightwatch_intel"  # ChromaDB directory; auto-detected at startup
+INTEL_TOP_K = 3                    # retrieved snippets injected per prompt

@@ -10,6 +10,7 @@ A fully local, privacy-first log analyzer that uses a local LLM (via Ollama) to 
 | **Log formats** | syslog / auth.log, nginx/apache CLF, JSON logs, Windows Event Log CSV |
 | **Alert persistence** | SQLite database — query by severity, IP, source file, or free text |
 | **Models** | `mistral:7b` for analysis · `llama3.2` for fast watch mode |
+| **Threat intel RAG** | MITRE ATT&CK + NVD CVE context injected into every analysis prompt |
 
 ## Prerequisites
 
@@ -25,6 +26,24 @@ ollama pull llama3.2
 
 # 2. Install Python dependencies
 pip install -r requirements.txt
+```
+
+### Optional: Threat Intelligence RAG
+
+Enriches every analysis with relevant MITRE ATT&CK techniques and CVE references, retrieved locally via ChromaDB. Alerts will include technique IDs (e.g. T1110), tactic names, and CVE context.
+
+```bash
+# 1. Pull the embedding model
+ollama pull nomic-embed-text
+
+# 2. Build the vector database (downloads ~20 MB of MITRE ATT&CK data)
+python scripts/build_intel_db.py --download
+```
+
+Once `./nightwatch_intel/` exists, NightWatch loads it automatically — no extra flags needed. To also include NVD CVE data, download a feed from [nvd.nist.gov](https://nvd.nist.gov/vuln/data-feeds) and pass it with `--nvd`:
+
+```bash
+python scripts/build_intel_db.py --download --nvd /path/to/nvdcve-1.1-recent.json
 ```
 
 ## Usage
@@ -88,13 +107,30 @@ FormatDetector → LogParser (syslog / CLF / JSON / Windows CSV)
       ▼                        Iterator[LogEntry]
 ThreatAnalyzer
   ├── Chunks entries to fit token budget (~1500 tokens/chunk)
-  ├── Builds layered prompt: system → rolling context → log chunk
-  ├── Streams response from Ollama (mistral:7b)
+  ├── Retrieves relevant MITRE ATT&CK / CVE snippets from ChromaDB  ← RAG
+  ├── Builds layered prompt: system → threat intel context → rolling context → log chunk
+  ├── Streams response from Ollama (mistrat:7b)
   ├── Parses JSON → list[Alert]
   └── Persists each Alert to SQLite (nightwatch.db)
       │
       ▼
 Rich console — color-coded panels per alert
+```
+
+### RAG pipeline
+
+```
+Ingest (one-time)
+  MITRE ATT&CK JSON / NVD CVE feed
+        │
+        ▼
+  nomic-embed-text (Ollama) → vector embeddings → ChromaDB (nightwatch_intel/)
+
+Analysis (per log chunk)
+  log chunk text → embed → cosine similarity search → top-3 intel snippets
+                                                            │
+                                                            ▼
+                                               injected into system prompt
 ```
 
 ## Configuration
@@ -108,6 +144,9 @@ Edit `config.py` to change models, chunk size, or database path.
 | `CHUNK_TOKEN_BUDGET` | `1500` | Max tokens per log chunk sent to LLM |
 | `MIN_SEVERITY` | `LOW` | Default minimum severity to display |
 | `ALERT_DB_PATH` | `./nightwatch.db` | SQLite database location |
+| `EMBED_MODEL` | `nomic-embed-text` | Ollama model used to embed intel chunks and queries |
+| `INTEL_DB_PATH` | `./nightwatch_intel` | ChromaDB directory for threat intelligence |
+| `INTEL_TOP_K` | `3` | Number of intel snippets retrieved per log chunk |
 
 ## Running tests
 
